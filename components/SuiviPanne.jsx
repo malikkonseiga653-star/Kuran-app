@@ -1,3 +1,4 @@
+"use client";
 import { useState, useEffect, useRef } from "react";
 import { Search, Phone, CheckCircle2, Clock, AlertCircle, XCircle, Send } from "lucide-react";
 import { supabase } from "../lib/supabase";
