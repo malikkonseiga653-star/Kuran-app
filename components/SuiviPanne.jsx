@@ -1,4 +1,4 @@
-"use client";
+"use client"
 import { useState, useEffect, useRef } from "react";
 import { Search, Phone, CheckCircle2, Clock, AlertCircle, XCircle, Send } from "lucide-react";
 import { supabase } from "../lib/supabase";
@@ -123,9 +123,7 @@ export default function SuiviPanne() {
 
   useEffect(() => {
     finChat.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  return (
+  }, [messages]);return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
       <div style={{ textAlign: "center", marginBottom: 24 }}>
         <div style={{ display: "flex", justifyContent: "center", gap: 4, marginBottom: 12 }}>
@@ -140,3 +138,178 @@ export default function SuiviPanne() {
           Entrez le numéro reçu lors de votre déclaration
         </p>
       </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <input
+          type="text"
+          value={numeroSuivi}
+          onChange={(e) => setNumeroSuivi(e.target.value)}
+          placeholder="PANNE-2026-000123"
+          style={{
+            flex: 1,
+            padding: "12px 14px",
+            borderRadius: 10,
+            border: "1.5px solid #ddd",
+            fontSize: 15,
+            outline: "none",
+          }}
+          onKeyDown={(e) => e.key === "Enter" && rechercher()}
+        />
+        <button
+          onClick={rechercher}
+          disabled={chargement}
+          style={{
+            background: "#009E49",
+            color: "white",
+            border: "none",
+            borderRadius: 10,
+            padding: "0 18px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+          }}
+        >
+          <Search size={18} />
+        </button>
+      </div>
+
+      {erreur && (
+        <p style={{ color: "#EF3340", fontSize: 14, textAlign: "center" }}>{erreur}</p>
+      )}
+
+      {resultat && (
+        <>
+          <div
+            style={{
+              border: "1.5px solid #eee",
+              borderRadius: 14,
+              padding: 18,
+              marginTop: 12,
+              background: "#fafafa",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontWeight: 700, fontSize: 15 }}>{resultat.numero_suivi}</span>
+              {(() => {
+                const s = STATUTS[resultat.statut] || STATUTS.nouveau;
+                const Icon = s.icon;
+                return (
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                      color: s.color,
+                      fontWeight: 600,
+                      fontSize: 13,
+                    }}
+                  >
+                    <Icon size={16} /> {s.label}
+                  </span>
+                );
+              })()}
+            </div>
+            <p style={{ fontSize: 14, color: "#444", marginTop: 10 }}>{resultat.description}</p>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, color: "#888", fontSize: 13 }}>
+              <Phone size={14} /> {resultat.telephone_client}
+            </div>
+          </div>
+
+          <div
+            style={{
+              marginTop: 16,
+              border: "1.5px solid #eee",
+              borderRadius: 14,
+              overflow: "hidden",
+              background: "white",
+            }}
+          >
+            <div
+              style={{
+                background: "#1a1a1a",
+                color: "white",
+                padding: "10px 14px",
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              Discussion avec l'équipe Kuran-app
+            </div>
+
+            <div style={{ maxHeight: 260, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+              {messages.length === 0 && (
+                <p style={{ color: "#999", fontSize: 13, textAlign: "center", margin: "20px 0" }}>
+                  Aucun message pour l'instant.
+                </p>
+              )}
+              {messages.map((m) => (
+                <div
+                  key={m.id}
+                  style={{
+                    alignSelf: m.auteur === "client" ? "flex-end" : "flex-start",
+                    maxWidth: "80%",
+                  }}
+                >
+                  <div
+                    style={{
+                      background: m.auteur === "client" ? "#009E49" : "#f0f0f0",
+                      color: m.auteur === "client" ? "white" : "#1a1a1a",
+                      padding: "8px 12px",
+                      borderRadius: 12,
+                      fontSize: 14,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {m.contenu}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#999", marginTop: 2, textAlign: m.auteur === "client" ? "right" : "left" }}>
+                    {m.auteur === "client" ? "Vous" : "Admin"} ·{" "}
+                    {new Date(m.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                  </div>
+                </div>
+              ))}
+              <div ref={finChat} />
+            </div>
+
+            <div style={{ display: "flex", gap: 8, padding: 10, borderTop: "1px solid #eee" }}>
+              <input
+                type="text"
+                value={nouveauMessage}
+                onChange={(e) => setNouveauMessage(e.target.value)}
+                placeholder="Votre message..."
+                style={{
+                  flex: 1,
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  border: "1.5px solid #ddd",
+                  fontSize: 14,
+                  outline: "none",
+                }}
+                onKeyDown={(e) => e.key === "Enter" && envoyerMessage()}
+              />
+              <button
+                onClick={envoyerMessage}
+                disabled={envoiEnCours || !nouveauMessage.trim()}
+                style={{
+                  background: "#009E49",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 10,
+                  padding: "0 14px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  opacity: !nouveauMessage.trim() ? 0.5 : 1,
+                }}
+              >
+                <Send size={16} />
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+                                                                                                 }
