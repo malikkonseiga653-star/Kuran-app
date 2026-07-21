@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+"use client";
+import { useState } from "react";import { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, Users, HardHat, ClipboardList, MessageSquare,
   AlertTriangle, Phone, GraduationCap, Search, Send,
