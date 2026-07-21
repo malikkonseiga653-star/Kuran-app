@@ -8,7 +8,10 @@ import {
 } from "lucide-react";
 import {
   chargerPannes, chargerElectriciens, ajouterPanneDB, majPanneDB,
-  ajouterElectricienDB, majElectricienDB,
+  ajouterElectricienDB, majElectricienDB, verifierMotDePasseAdmin, changerMotDePasseAdmin,
+  connecterCompteAdmin, demanderCompteEmploye, chargerComptesAdmin, majStatutCompteAdmin,
+  enregistrerAction, chargerJournal, feliciterElectricien, marquerFelicitationVueElectricien,
+  feliciterEmploye, marquerFelicitationVueEmploye,
 } from "../lib/supabase";
 
 // Couleurs du drapeau burkinabè
@@ -21,8 +24,7 @@ const NUMERO_ORANGE_MONEY = "+226 70 00 00 00"; // numéro à afficher aux usage
 
 // ATTENTION SÉCURITÉ : ces identifiants sont visibles par quiconque inspecte le code du site.
 // Change ce mot de passe avant de partager le lien, et évite d'utiliser un mot de passe que tu utilises ailleurs.
-const ADMIN_IDENTIFIANT = "admin";
-const ADMIN_MOT_DE_PASSE = "kuran2026";
+// Le mot de passe admin est maintenant géré via la table Supabase "comptes_admin" (voir lib/supabase.js)
 
 const STATUTS = {
   nouveau: { label: "Nouveau", color: ROUGE, bg: "#FDEBEB" },
@@ -66,6 +68,53 @@ function timeAgo(ts) {
   if (diff < 3600) return `il y a ${Math.floor(diff / 60)} min`;
   if (diff < 86400) return `il y a ${Math.floor(diff / 3600)} h`;
   return `il y a ${Math.floor(diff / 86400)} j`;
+}
+
+function libelleAction(action) {
+  const libelles = {
+    validation_electricien: "a validé l'électricien",
+    refus_electricien: "a refusé l'électricien",
+    paiement_confirme: "a confirmé un paiement pour",
+    maj_panne: "a mis à jour la panne",
+    validation_employe: "a validé l'employé",
+    refus_employe: "a refusé l'employé",
+    suspendu: "a suspendu le compte de",
+    bloque: "a bloqué définitivement",
+    reactive: "a réactivé le compte de",
+  };
+  return libelles[action] || action;
+}
+
+function libelleStatutPersonne(statut) {
+  const libelles = {
+    valide: "Validé", refuse: "Refusé", suspendu: "Suspendu", bloque: "Bloqué définitivement",
+  };
+  return libelles[statut] || statut;
+}
+
+function badgeStyleStatut(statut) {
+  if (statut === "valide") return { color: VERT, background: "#E6F5EC" };
+  if (statut === "suspendu") return { color: "#B8860B", background: "#FFF7DC" };
+  if (statut === "bloque" || statut === "refuse") return { color: ROUGE, background: "#FDEBEB" };
+  return { color: "#666", background: "#EEE" };
+}
+
+function BanniereFelicitation({ visible, onFermer }) {
+  if (!visible) return null;
+  return (
+    <div style={{
+      background: "#E6F5EC", border: `1px solid ${VERT}`, borderRadius: 12,
+      padding: "14px 16px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10,
+    }}>
+      <BadgeCheck size={20} color={VERT} />
+      <div style={{ flex: 1, fontSize: 14, color: "#1A1A1A" }}>
+        <strong>Excellent boulot !</strong> L'administration est satisfaite de ton travail.
+      </div>
+      <button onClick={onFermer} style={{ background: "none", border: "none", cursor: "pointer" }}>
+        <X size={16} color="#666" />
+      </button>
+    </div>
+  );
 }
 
 function PulseDot({ color }) {
@@ -132,7 +181,7 @@ export default function SonabelPannes() {
   const [loading, setLoading] = useState(true);
   const [erreur, setErreur] = useState(null);
   const [electricienConnecte, setElectricienConnecte] = useState(null);
-  const [adminConnecte, setAdminConnecte] = useState(false);
+  const [compteAdmin, setCompteAdmin] = useState(null); // { id, identifiant, nom, prenom, role }
   const [afficherIntro, setAfficherIntro] = useState(null); // null = pas encore décidé
 
   async function chargerTout() {
@@ -254,19 +303,20 @@ export default function SonabelPannes() {
           onDeconnexion={() => { setElectricienConnecte(null); setVue("accueil"); }}
         />
       )}
-      {vue === "admin" && !adminConnecte && (
+      {vue === "admin" && !compteAdmin && (
         <ConnexionAdmin
-          onConnecte={() => setAdminConnecte(true)}
+          onConnecte={(compte) => setCompteAdmin(compte)}
           setVue={setVue}
         />
       )}
-      {vue === "admin" && adminConnecte && (
+      {vue === "admin" && compteAdmin && (
         <VueAdmin
           electriciens={electriciens}
           onChangerStatut={changerStatutElectricien}
           pannes={pannes}
           onChangerStatutPanne={changerStatutPanne}
-          onDeconnexion={() => { setAdminConnecte(false); setVue("accueil"); }}
+          onDeconnexion={() => { setCompteAdmin(null); setVue("accueil"); }}
+          compteAdmin={compteAdmin}
         />
       )}
 
@@ -695,6 +745,14 @@ function Connexion({ electriciens, onConnecte, setVue }) {
       setErreur("Ton inscription a été refusée. Contacte l'administration pour plus d'informations.");
       return;
     }
+    if (trouve.statut === "suspendu") {
+      setErreur("Ton compte a été suspendu par l'administration. Contacte-la pour plus d'informations.");
+      return;
+    }
+    if (trouve.statut === "bloque") {
+      setErreur("Ton compte a été définitivement bloqué.");
+      return;
+    }
     onConnecte(trouve);
   }
 
@@ -719,33 +777,132 @@ function Connexion({ electriciens, onConnecte, setVue }) {
 // ---------------- CONNEXION ADMIN ----------------
 
 function ConnexionAdmin({ onConnecte, setVue }) {
+  const [mode, setMode] = useState("connexion"); // "connexion" ou "demande"
   const [identifiant, setIdentifiant] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
   const [erreur, setErreur] = useState(null);
+  const [verification, setVerification] = useState(false);
 
-  function seConnecter(e) {
+  // Champs pour la demande d'accès employé
+  const [nom, setNom] = useState("");
+  const [prenom, setPrenom] = useState("");
+  const [nouvelIdentifiant, setNouvelIdentifiant] = useState("");
+  const [nouveauMdp, setNouveauMdp] = useState("");
+  const [demandeEnvoyee, setDemandeEnvoyee] = useState(false);
+
+  async function seConnecter(e) {
     e.preventDefault();
-    if (identifiant.trim() === ADMIN_IDENTIFIANT && motDePasse === ADMIN_MOT_DE_PASSE) {
-      onConnecte();
+    setErreur(null);
+    setVerification(true);
+    const compte = await connecterCompteAdmin(identifiant.trim(), motDePasse);
+    setVerification(false);
+    if (!compte) {
+      setErreur("Identifiant ou mot de passe incorrect.");
       return;
     }
-    setErreur("Identifiant ou mot de passe incorrect.");
+    if (compte.statut === "en_attente") {
+      setErreur("Ta demande d'accès est encore en attente de validation.");
+      return;
+    }
+    if (compte.statut === "refuse") {
+      setErreur("Ta demande d'accès a été refusée. Contacte l'administrateur principal.");
+      return;
+    }
+    if (compte.statut === "suspendu") {
+      setErreur("Ton accès a été suspendu par l'administrateur principal.");
+      return;
+    }
+    if (compte.statut === "bloque") {
+      setErreur("Ton accès a été définitivement bloqué.");
+      return;
+    }
+    onConnecte(compte);
+  }
+
+  async function envoyerDemande(e) {
+    e.preventDefault();
+    setErreur(null);
+    if (!nom.trim() || !prenom.trim() || !nouvelIdentifiant.trim() || nouveauMdp.length < 6) {
+      setErreur("Remplis tous les champs (mot de passe : 6 caractères minimum).");
+      return;
+    }
+    setVerification(true);
+    const ok = await demanderCompteEmploye({
+      id: `emp-${Date.now()}`,
+      identifiant: nouvelIdentifiant.trim(),
+      motDePasse: nouveauMdp,
+      nom: nom.trim(),
+      prenom: prenom.trim(),
+      creeLe: Date.now(),
+    });
+    setVerification(false);
+    if (ok) {
+      setDemandeEnvoyee(true);
+    } else {
+      setErreur("Cet identifiant est peut-être déjà pris, ou une erreur est survenue.");
+    }
+  }
+
+  if (demandeEnvoyee) {
+    return (
+      <div style={styles.pageWrap}>
+        <h2 style={styles.pageTitle}>Demande envoyée</h2>
+        <p style={{ ...styles.heroDesc, marginLeft: 0, marginRight: 0 }}>
+          Ta demande d'accès a bien été transmise à l'administrateur principal. Tu pourras te connecter une fois qu'elle sera validée.
+        </p>
+        <button style={{ ...styles.linkBtn, marginTop: 18 }} onClick={() => setVue("accueil")}>
+          ← Retour à l'accueil
+        </button>
+      </div>
+    );
   }
 
   return (
     <div style={styles.pageWrap}>
       <h2 style={styles.pageTitle}>Connexion administrateur</h2>
       <p style={{ ...styles.heroDesc, marginBottom: 20, fontSize: 13.5, marginLeft: 0, marginRight: 0 }}>
-        Accès réservé aux administrateurs Kuran.
+        Accès réservé aux administrateurs et employés Kuran.
       </p>
-      <form onSubmit={seConnecter} style={styles.form}>
-        <label style={styles.label}>Identifiant</label>
-        <input style={styles.input} value={identifiant} onChange={(e) => setIdentifiant(e.target.value)} autoFocus />
-        <label style={styles.label}>Mot de passe</label>
-        <input style={styles.input} type="password" value={motDePasse} onChange={(e) => setMotDePasse(e.target.value)} />
-        {erreur && <div style={styles.warnText}><AlertTriangle size={13} /> {erreur}</div>}
-        <button type="submit" style={styles.submitBtn}>Se connecter</button>
-      </form>
+
+      <div style={styles.filtreRow}>
+        <button style={{ ...styles.filtreBtn, ...(mode === "connexion" ? styles.filtreBtnActive : {}) }} onClick={() => { setMode("connexion"); setErreur(null); }}>
+          Se connecter
+        </button>
+        <button style={{ ...styles.filtreBtn, ...(mode === "demande" ? styles.filtreBtnActive : {}) }} onClick={() => { setMode("demande"); setErreur(null); }}>
+          Demander un accès
+        </button>
+      </div>
+
+      {mode === "connexion" && (
+        <form onSubmit={seConnecter} style={styles.form}>
+          <label style={styles.label}>Identifiant</label>
+          <input style={styles.input} value={identifiant} onChange={(e) => setIdentifiant(e.target.value)} autoFocus />
+          <label style={styles.label}>Mot de passe</label>
+          <input style={styles.input} type="password" value={motDePasse} onChange={(e) => setMotDePasse(e.target.value)} />
+          {erreur && <div style={styles.warnText}><AlertTriangle size={13} /> {erreur}</div>}
+          <button type="submit" style={styles.submitBtn} disabled={verification}>
+            {verification ? "Vérification..." : "Se connecter"}
+          </button>
+        </form>
+      )}
+
+      {mode === "demande" && (
+        <form onSubmit={envoyerDemande} style={styles.form}>
+          <label style={styles.label}>Prénom</label>
+          <input style={styles.input} value={prenom} onChange={(e) => setPrenom(e.target.value)} />
+          <label style={styles.label}>Nom</label>
+          <input style={styles.input} value={nom} onChange={(e) => setNom(e.target.value)} />
+          <label style={styles.label}>Identifiant souhaité</label>
+          <input style={styles.input} value={nouvelIdentifiant} onChange={(e) => setNouvelIdentifiant(e.target.value)} />
+          <label style={styles.label}>Mot de passe (6 caractères min.)</label>
+          <input style={styles.input} type="password" value={nouveauMdp} onChange={(e) => setNouveauMdp(e.target.value)} />
+          {erreur && <div style={styles.warnText}><AlertTriangle size={13} /> {erreur}</div>}
+          <button type="submit" style={styles.submitBtn} disabled={verification}>
+            {verification ? "Envoi..." : "Envoyer la demande"}
+          </button>
+        </form>
+      )}
+
       <button style={{ ...styles.linkBtn, marginTop: 18 }} onClick={() => setVue("accueil")}>
         ← Retour à l'accueil
       </button>
@@ -757,10 +914,16 @@ function ConnexionAdmin({ onConnecte, setVue }) {
 
 function VueElectricien({ pannes, onChangerStatut, loading, electricien, onDeconnexion }) {
   const [filtre, setFiltre] = useState("actives");
+  const [felicitationVisible, setFelicitationVisible] = useState(!electricien.felicitationVue);
   const liste = filtre === "actives" ? pannes.filter((p) => p.statut !== "resolu") : pannes;
 
   const pannesResolues = pannes.filter((p) => p.statut === "resolu" && p.prixFinal);
   const totalGagne = pannesResolues.reduce((acc, p) => acc + (p.prixFinal - p.commission), 0);
+
+  function fermerFelicitation() {
+    setFelicitationVisible(false);
+    marquerFelicitationVueElectricien(electricien.id);
+  }
 
   return (
     <div style={styles.pageWrap}>
@@ -771,6 +934,8 @@ function VueElectricien({ pannes, onChangerStatut, loading, electricien, onDecon
         </div>
         <button style={styles.logoutBtn} onClick={onDeconnexion}><LogOut size={14} /></button>
       </div>
+
+      <BanniereFelicitation visible={felicitationVisible} onFermer={fermerFelicitation} />
 
       <div style={styles.gainsCard}>
         <div style={styles.gainsBloc}>
@@ -898,12 +1063,83 @@ function CommandeCard({ panne, onChangerStatut }) {
 
 // ---------------- ADMIN ----------------
 
-function VueAdmin({ electriciens, onChangerStatut, pannes, onChangerStatutPanne, onDeconnexion }) {
-  const [onglet, setOnglet] = useState("paiements");
+function VueAdmin({ electriciens, onChangerStatut, pannes, onChangerStatutPanne, onDeconnexion, compteAdmin }) {
+  const estPrincipal = compteAdmin?.role === "admin_principal";
+  const [onglet, setOnglet] = useState("toutes");
+  const [nouveauMdp, setNouveauMdp] = useState("");
+  const [confirmMdp, setConfirmMdp] = useState("");
+  const [messageMdp, setMessageMdp] = useState(null);
+  const [enregistrement, setEnregistrement] = useState(false);
+  const [comptesAdmin, setComptesAdmin] = useState([]);
+  const [journal, setJournal] = useState([]);
   const enAttente = electriciens.filter((e) => e.statut === "en_attente");
   const traites = electriciens.filter((e) => e.statut !== "en_attente");
   const enAttentePaiement = pannes.filter((p) => p.statut === "en_attente_paiement");
   const totalCommissions = pannes.filter((p) => p.statut === "resolu" && p.commission).reduce((acc, p) => acc + p.commission, 0);
+  const pannesTriees = [...pannes].sort((a, b) => b.creeLe - a.creeLe);
+  const employesEnAttente = comptesAdmin.filter((c) => c.role === "employe" && c.statut === "en_attente");
+  const employesTraites = comptesAdmin.filter((c) => c.role === "employe" && c.statut !== "en_attente");
+  const [felicitationVisible, setFelicitationVisible] = useState(compteAdmin && !compteAdmin.felicitationVue);
+
+  function fermerFelicitation() {
+    setFelicitationVisible(false);
+    marquerFelicitationVueEmploye(compteAdmin.id);
+  }
+
+  useEffect(() => {
+    if (estPrincipal && (onglet === "employes" || onglet === "journal")) {
+      chargerComptesAdmin().then(setComptesAdmin);
+      chargerJournal().then(setJournal);
+    }
+  }, [onglet, estPrincipal]);
+
+  async function validerEmploye(id, statut) {
+    const ok = await majStatutCompteAdmin(id, statut);
+    if (ok) {
+      setComptesAdmin((prev) => prev.map((c) => (c.id === id ? { ...c, statut } : c)));
+      const cible = comptesAdmin.find((c) => c.id === id);
+      const nomCible = cible ? `${cible.prenom} ${cible.nom}` : id;
+      const actionsMap = { valide: "validation_employe", refuse: "refus_employe", suspendu: "suspendu", bloque: "bloque" };
+      await enregistrerAction(compteAdmin, actionsMap[statut] || statut, nomCible);
+    }
+  }
+
+  async function changerStatutPanneAvecJournal(id, statut, prixFinal) {
+    await onChangerStatutPanne(id, statut, prixFinal);
+    const cible = pannes.find((p) => p.id === id);
+    await enregistrerAction(compteAdmin, statut === "resolu" ? "paiement_confirme" : "maj_panne", cible ? cible.type : id);
+  }
+
+  async function changerStatutElectricienAvecJournal(id, statut) {
+    await onChangerStatut(id, statut);
+    const cible = electriciens.find((e) => e.id === id);
+    const nomCible = cible ? `${cible.prenom} ${cible.nom}` : id;
+    const actionsMap = { valide: "validation_electricien", refuse: "refus_electricien", suspendu: "suspendu", bloque: "bloque" };
+    await enregistrerAction(compteAdmin, actionsMap[statut] || statut, nomCible);
+  }
+
+  async function soumettreMdp(e) {
+    e.preventDefault();
+    setMessageMdp(null);
+    if (nouveauMdp.length < 6) {
+      setMessageMdp({ type: "erreur", texte: "Le mot de passe doit contenir au moins 6 caractères." });
+      return;
+    }
+    if (nouveauMdp !== confirmMdp) {
+      setMessageMdp({ type: "erreur", texte: "Les deux mots de passe ne correspondent pas." });
+      return;
+    }
+    setEnregistrement(true);
+    const ok = await changerMotDePasseAdmin(nouveauMdp);
+    setEnregistrement(false);
+    if (ok) {
+      setMessageMdp({ type: "succes", texte: "Mot de passe mis à jour avec succès." });
+      setNouveauMdp("");
+      setConfirmMdp("");
+    } else {
+      setMessageMdp({ type: "erreur", texte: "Échec de la mise à jour. Réessaie." });
+    }
+  }
 
   return (
     <div style={styles.pageWrap}>
@@ -912,24 +1148,72 @@ function VueAdmin({ electriciens, onChangerStatut, pannes, onChangerStatutPanne,
         <button style={styles.logoutBtn} onClick={onDeconnexion}><LogOut size={14} /></button>
       </div>
 
+      <BanniereFelicitation visible={felicitationVisible} onFermer={fermerFelicitation} />
+
       <div style={styles.filtreRow}>
+        <button style={{ ...styles.filtreBtn, ...(onglet === "toutes" ? styles.filtreBtnActive : {}) }} onClick={() => setOnglet("toutes")}>
+          Toutes les pannes ({pannes.length})
+        </button>
         <button style={{ ...styles.filtreBtn, ...(onglet === "paiements" ? styles.filtreBtnActive : {}) }} onClick={() => setOnglet("paiements")}>
           Paiements ({enAttentePaiement.length})
         </button>
         <button style={{ ...styles.filtreBtn, ...(onglet === "electriciens" ? styles.filtreBtnActive : {}) }} onClick={() => setOnglet("electriciens")}>
           Électriciens {enAttente.length > 0 ? `(${enAttente.length})` : ""}
         </button>
+        <button style={{ ...styles.filtreBtn, ...(onglet === "compte" ? styles.filtreBtnActive : {}) }} onClick={() => setOnglet("compte")}>
+          Compte
+        </button>
+        {estPrincipal && (
+          <button style={{ ...styles.filtreBtn, ...(onglet === "employes" ? styles.filtreBtnActive : {}) }} onClick={() => setOnglet("employes")}>
+            Employés {employesEnAttente.length > 0 ? `(${employesEnAttente.length})` : ""}
+          </button>
+        )}
+        {estPrincipal && (
+          <button style={{ ...styles.filtreBtn, ...(onglet === "journal" ? styles.filtreBtnActive : {}) }} onClick={() => setOnglet("journal")}>
+            Journal
+          </button>
+        )}
       </div>
+
+      {onglet === "toutes" && (
+        <>
+          {pannesTriees.length === 0 ? (
+            <div style={styles.emptyState}><Wallet size={28} color="#C8C8C8" /><div>Aucune panne signalée pour l'instant</div></div>
+          ) : (
+            <div style={styles.listeCommandes}>
+              {pannesTriees.map((p) => (
+                <div key={p.id} style={styles.paiementCard}>
+                  <div style={styles.commandeTop}>
+                    <span style={styles.commandeType}>{p.type}</span>
+                    <span style={{ ...styles.badge, color: STATUTS[p.statut]?.color, background: STATUTS[p.statut]?.bg }}>
+                      {STATUTS[p.statut]?.label || p.statut}
+                    </span>
+                  </div>
+                  <div style={styles.commandeSecteur}><MapPin size={13} /> {p.secteur}</div>
+                  {p.description && <div style={{ ...styles.commandeSecteur, marginTop: 2 }}>{p.description}</div>}
+                  <div style={styles.commandeTime}><Clock size={12} /> {timeAgo(p.creeLe)}</div>
+                  {p.prixFinal && (
+                    <div style={{ ...styles.commandeSecteur, marginTop: 4 }}>
+                      Prix convenu : {formatFCFA(p.prixFinal)}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
 
       {onglet === "paiements" && (
         <>
-          <div style={styles.gainsCard}>
-            <div style={styles.gainsBloc}>
-              <div style={styles.gainsLabel}>Commissions perçues (total)</div>
-              <div style={styles.gainsValeur}>{formatFCFA(totalCommissions)}</div>
+          {estPrincipal && (
+            <div style={styles.gainsCard}>
+              <div style={styles.gainsBloc}>
+                <div style={styles.gainsLabel}>Commissions perçues (total)</div>
+                <div style={styles.gainsValeur}>{formatFCFA(totalCommissions)}</div>
+              </div>
             </div>
-          </div>
-
+          )}
           {enAttentePaiement.length === 0 ? (
             <div style={styles.emptyState}><Wallet size={28} color="#C8C8C8" /><div>Aucun paiement en attente</div></div>
           ) : (
@@ -943,9 +1227,11 @@ function VueAdmin({ electriciens, onChangerStatut, pannes, onChangerStatutPanne,
                   <div style={styles.commandeSecteur}><MapPin size={13} /> {p.secteur}</div>
                   <div style={styles.resumeGain}>
                     <div style={styles.resumeGainLigne}><span>Montant à recevoir</span><span>{formatFCFA(p.prixFinal)}</span></div>
-                    <div style={styles.resumeGainLigne}><span>Commission Kuran (15%)</span><span>{formatFCFA(p.commission)}</span></div>
+                    {estPrincipal && (
+                      <div style={styles.resumeGainLigne}><span>Commission Kuran (15%)</span><span>{formatFCFA(p.commission)}</span></div>
+                    )}
                   </div>
-                  <button style={styles.actionBtnResolu} onClick={() => onChangerStatutPanne(p.id, "resolu")}>
+                  <button style={styles.actionBtnResolu} onClick={() => changerStatutPanneAvecJournal(p.id, "resolu")}>
                     <CheckCircle2 size={14} /> Paiement reçu — prévenir l'électricien
                   </button>
                 </div>
@@ -972,10 +1258,10 @@ function VueAdmin({ electriciens, onChangerStatut, pannes, onChangerStatutPanne,
                     <div style={styles.candidatDetail}>CNIB : {e.cnibNomFichier}</div>
                     <div style={styles.commandeActions}>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <button style={styles.actionBtnResolu} onClick={() => onChangerStatut(e.id, "valide")}>
+                        <button style={styles.actionBtnResolu} onClick={() => changerStatutElectricienAvecJournal(e.id, "valide")}>
                           <CheckCircle2 size={14} /> Valider
                         </button>
-                        <button style={styles.actionBtnRefuser} onClick={() => onChangerStatut(e.id, "refuse")}>
+                        <button style={styles.actionBtnRefuser} onClick={() => changerStatutElectricienAvecJournal(e.id, "refuse")}>
                           <XCircle size={14} /> Refuser
                         </button>
                       </div>
@@ -993,13 +1279,149 @@ function VueAdmin({ electriciens, onChangerStatut, pannes, onChangerStatutPanne,
                 {traites.map((e) => (
                   <div key={e.id} style={styles.candidatCardTraite}>
                     <div style={styles.candidatNom}>{e.prenom} {e.nom}</div>
-                    <span style={{ ...styles.badge, color: e.statut === "valide" ? VERT : ROUGE, background: e.statut === "valide" ? "#E6F5EC" : "#FDEBEB" }}>
-                      {e.statut === "valide" ? "Validé" : "Refusé"}
+                    <span style={{ ...styles.badge, ...badgeStyleStatut(e.statut) }}>
+                      {libelleStatutPersonne(e.statut)}
                     </span>
+                    {(e.statut === "valide" || e.statut === "suspendu") && (
+                      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                        <button style={styles.actionBtnResolu} onClick={() => { feliciterElectricien(e.id); }}>
+                          <BadgeCheck size={13} /> Excellent boulot
+                        </button>
+                        {e.statut === "valide" && (
+                          <button style={styles.actionBtnRefuser} onClick={() => changerStatutElectricienAvecJournal(e.id, "suspendu")}>
+                            Suspendre
+                          </button>
+                        )}
+                        {e.statut === "suspendu" && (
+                          <button style={styles.actionBtnResolu} onClick={() => changerStatutElectricienAvecJournal(e.id, "valide")}>
+                            Réactiver
+                          </button>
+                        )}
+                        <button style={styles.actionBtnRefuser} onClick={() => changerStatutElectricienAvecJournal(e.id, "bloque")}>
+                          <XCircle size={13} /> Bloquer définitivement
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             </>
+          )}
+        </>
+      )}
+
+      {onglet === "compte" && (
+        <div style={{ maxWidth: 420 }}>
+          <div style={{ ...styles.adminSection, marginBottom: 12 }}>Changer le mot de passe</div>
+          <form onSubmit={soumettreMdp} style={styles.form}>
+            <label style={styles.label}>Nouveau mot de passe</label>
+            <input
+              style={styles.input}
+              type="password"
+              value={nouveauMdp}
+              onChange={(e) => setNouveauMdp(e.target.value)}
+              placeholder="Au moins 6 caractères"
+            />
+            <label style={styles.label}>Confirmer le mot de passe</label>
+            <input
+              style={styles.input}
+              type="password"
+              value={confirmMdp}
+              onChange={(e) => setConfirmMdp(e.target.value)}
+            />
+            {messageMdp && (
+              <div style={messageMdp.type === "erreur" ? styles.warnText : styles.resoluText}>
+                {messageMdp.type === "erreur" ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}
+                {" "}{messageMdp.texte}
+              </div>
+            )}
+            <button type="submit" style={styles.submitBtn} disabled={enregistrement}>
+              {enregistrement ? "Enregistrement..." : "Mettre à jour le mot de passe"}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {onglet === "employes" && estPrincipal && (
+        <>
+          {comptesAdmin.length === 0 && <div style={styles.emptyState}>Aucune demande pour l'instant</div>}
+
+          {employesEnAttente.length > 0 && (
+            <>
+              <div style={styles.adminSection}>Demandes en attente ({employesEnAttente.length})</div>
+              <div style={styles.listeCommandes}>
+                {employesEnAttente.map((c) => (
+                  <div key={c.id} style={styles.candidatCard}>
+                    <div style={styles.candidatNom}>{c.prenom} {c.nom}</div>
+                    <div style={styles.candidatDetail}>Identifiant : {c.identifiant}</div>
+                    <div style={styles.commandeActions}>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button style={styles.actionBtnResolu} onClick={() => validerEmploye(c.id, "valide")}>
+                          <CheckCircle2 size={14} /> Valider
+                        </button>
+                        <button style={styles.actionBtnRefuser} onClick={() => validerEmploye(c.id, "refuse")}>
+                          <XCircle size={14} /> Refuser
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {employesTraites.length > 0 && (
+            <>
+              <div style={{ ...styles.adminSection, marginTop: 28 }}>Comptes employés ({employesTraites.length})</div>
+              <div style={styles.listeCommandes}>
+                {employesTraites.map((c) => (
+                  <div key={c.id} style={styles.candidatCardTraite}>
+                    <div style={styles.candidatNom}>{c.prenom} {c.nom} <span style={{ color: "#999", fontWeight: 400 }}>({c.identifiant})</span></div>
+                    <span style={{ ...styles.badge, ...badgeStyleStatut(c.statut) }}>
+                      {c.statut === "valide" ? "Actif" : libelleStatutPersonne(c.statut)}
+                    </span>
+                    {(c.statut === "valide" || c.statut === "suspendu") && (
+                      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                        <button style={styles.actionBtnResolu} onClick={() => feliciterEmploye(c.id)}>
+                          <BadgeCheck size={13} /> Excellent boulot
+                        </button>
+                        {c.statut === "valide" && (
+                          <button style={styles.actionBtnRefuser} onClick={() => validerEmploye(c.id, "suspendu")}>
+                            Suspendre
+                          </button>
+                        )}
+                        {c.statut === "suspendu" && (
+                          <button style={styles.actionBtnResolu} onClick={() => validerEmploye(c.id, "valide")}>
+                            Réactiver
+                          </button>
+                        )}
+                        <button style={styles.actionBtnRefuser} onClick={() => validerEmploye(c.id, "bloque")}>
+                          <XCircle size={13} /> Bloquer définitivement
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {onglet === "journal" && estPrincipal && (
+        <>
+          {journal.length === 0 ? (
+            <div style={styles.emptyState}>Aucune action enregistrée pour l'instant</div>
+          ) : (
+            <div style={styles.listeCommandes}>
+              {journal.map((j) => (
+                <div key={j.id} style={styles.candidatCardTraite}>
+                  <div style={styles.candidatNom}>{j.auteurNom}</div>
+                  <div style={styles.candidatDetail}>{libelleAction(j.action)}{j.cible ? ` — ${j.cible}` : ""}</div>
+                  <div style={styles.commandeTime}><Clock size={12} /> {timeAgo(j.horodatage)}</div>
+                </div>
+              ))}
+            </div>
           )}
         </>
       )}
