@@ -1,5 +1,4 @@
 "use client";
-
 import { useState } from "react";
 import { Send, Star, CheckCircle2, AlertCircle } from "lucide-react";
 import { supabase } from "../lib/supabase";
