@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";import { useState, useEffect, useRef } from "react";
+
+import { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard, Users, HardHat, ClipboardList, MessageSquare,
   AlertTriangle, Phone, GraduationCap, Search, Send,
@@ -72,10 +73,116 @@ export default function DashboardAdmin() {
   }
 
   return (
-    <div style={{ fontFamily: "system-ui
-// ============================================================
-// DEMANDES — pannes + installations réelles, avec chat prix
-// ============================================================
+    <div style={{ fontFamily: "system-ui, sans-serif", background: "#f7f7f5", minHeight: "100vh" }}>
+      <Entete role={role} />
+      <div style={{ display: "flex", maxWidth: 1100, margin: "0 auto" }}>
+        <NavLaterale ongletActif={ongletActif} setOngletActif={setOngletActif} />
+        <main style={{ flex: 1, padding: 24 }}>
+          {ongletActif === "apercu" && <Apercu />}
+          {ongletActif === "demandes" && <Demandes />}
+          {ongletActif === "electriciens" && <Electriciens role={role} />}
+          {ongletActif === "employes" && <Employes role={role} />}
+          {ongletActif === "plaintes" && <Plaintes />}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function Entete({ role }) {
+  return (
+    <div style={{ background: COULEURS.encre, color: "white", padding: "14px 24px" }}>
+      <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", gap: 3 }}>
+            <div style={{ width: 6, height: 20, background: COULEURS.vert, borderRadius: 1 }} />
+            <div style={{ width: 6, height: 20, background: COULEURS.jaune, borderRadius: 1 }} />
+            <div style={{ width: 6, height: 20, background: COULEURS.rouge, borderRadius: 1 }} />
+          </div>
+          <span style={{ fontWeight: 700, fontSize: 16 }}>Kuran-app Administration</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#ccc" }}>
+          <Shield size={14} />
+          {role === "admin_principal" ? "Administrateur principal" : "Employé"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NavLaterale({ ongletActif, setOngletActif }) {
+  return (
+    <nav style={{ width: 200, padding: "24px 12px", flexShrink: 0 }}>
+      {ONGLETS.map((o) => {
+        const Icon = o.icon;
+        const actif = ongletActif === o.id;
+        return (
+          <button
+            key={o.id}
+            onClick={() => setOngletActif(o.id)}
+            style={{
+              display: "flex", alignItems: "center", gap: 10, width: "100%",
+              padding: "10px 12px", marginBottom: 4, border: "none", borderRadius: 10,
+              background: actif ? "white" : "transparent",
+              color: actif ? COULEURS.encre : "#666",
+              fontWeight: actif ? 600 : 500, fontSize: 14, cursor: "pointer",
+              boxShadow: actif ? "0 1px 3px rgba(0,0,0,0.08)" : "none", textAlign: "left",
+            }}
+          >
+            <Icon size={16} /> {o.label}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function Apercu() {
+  const [stats, setStats] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const [{ count: demandesEnCours }, { count: electriciensActifs }, { count: plaintesNonTraitees }, { count: messagesNonLus }] =
+        await Promise.all([
+          supabase.from("pannes").select("*", { count: "exact", head: true }).eq("statut", "en_cours"),
+          supabase.from("electriciens").select("*", { count: "exact", head: true }).eq("statut", "actif"),
+          supabase.from("plaintes").select("*", { count: "exact", head: true }).neq("statut", "traite"),
+          supabase.from("messages_suivi").select("*", { count: "exact", head: true }).eq("lu", false),
+        ]);
+
+      setStats({
+        demandesEnCours: demandesEnCours || 0,
+        electriciensActifs: electriciensActifs || 0,
+        plaintesNonTraitees: plaintesNonTraitees || 0,
+        messagesNonLus: messagesNonLus || 0,
+      });
+    })();
+  }, []);
+
+  if (!stats) return <p style={{ color: "#999" }}>Chargement...</p>;
+
+  const cartes = [
+    { label: "Demandes en cours", valeur: stats.demandesEnCours, couleur: "#3B82F6" },
+    { label: "Électriciens actifs", valeur: stats.electriciensActifs, couleur: COULEURS.vert },
+    { label: "Plaintes non traitées", valeur: stats.plaintesNonTraitees, couleur: COULEURS.rouge },
+    { label: "Messages non lus", valeur: stats.messagesNonLus, couleur: "#D97757" },
+  ];
+
+  return (
+    <div>
+      <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Aperçu</h1>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+        {cartes.map((c) => (
+          <div key={c.label} style={{ background: "white", borderRadius: 14, padding: 18, border: "1px solid #eee" }}>
+            <div style={{ fontSize: 28, fontWeight: 700, color: c.couleur }}>{c.valeur}</div>
+            <div style={{ fontSize: 13, color: "#666", marginTop: 4 }}>{c.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Demandes() {
   const [demandes, setDemandes] = useState([]);
   const [selection, setSelection] = useState(null);
@@ -194,11 +301,49 @@ function ChatPrix({ demande, onFermer }) {
   };
 
   return (
-// ============================================================
-// ÉLECTRICIENS — accès complet réservé à admin_principal
-// employe voit electriciens_avec_stats (note moyenne, volume,
-// sans téléphone/diplôme/localisation)
-// ============================================================
+    <div style={{ flex: 1, background: "white", borderRadius: 14, border: "1px solid #eee", display: "flex", flexDirection: "column", height: 520 }}>
+      <div style={{ padding: "12px 16px", borderBottom: "1px solid #eee", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>{demande.numero_suivi}</div>
+          <div style={{ fontSize: 12, color: "#999" }}>{demande.telephone_client}</div>
+        </div>
+        <button onClick={onFermer} style={{ border: "none", background: "none", color: "#999", cursor: "pointer", fontSize: 13 }}>Fermer</button>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+        {messages.map((m) => (
+          <div key={m.id} style={{ alignSelf: m.auteur === "admin" ? "flex-end" : "flex-start", maxWidth: "78%" }}>
+            <div style={{
+              background: m.auteur === "admin" ? COULEURS.vert : "#f0f0f0",
+              color: m.auteur === "admin" ? "white" : "#1a1a1a",
+              padding: "8px 12px", borderRadius: 12, fontSize: 14,
+            }}>
+              {m.contenu}
+            </div>
+            <div style={{ fontSize: 11, color: "#999", marginTop: 2, textAlign: m.auteur === "admin" ? "right" : "left" }}>
+              {m.auteur === "admin" ? "Vous" : "Client"} · {new Date(m.created_at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+            </div>
+          </div>
+        ))}
+        <div ref={finChat} />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, padding: 10, borderTop: "1px solid #eee" }}>
+        <input
+          value={texte}
+          onChange={(e) => setTexte(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && envoyer()}
+          placeholder="Répondre au client"
+          style={{ flex: 1, padding: "9px 12px", borderRadius: 10, border: "1px solid #ddd", fontSize: 14 }}
+        />
+        <button onClick={envoyer} style={{ background: COULEURS.vert, border: "none", borderRadius: 10, padding: "0 14px", color: "white", cursor: "pointer" }}>
+          <Send size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Electriciens({ role }) {
   const [liste, setListe] = useState([]);
   const estAdminPrincipal = role === "admin_principal";
@@ -219,7 +364,7 @@ function Electriciens({ role }) {
     <div>
       <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Électriciens</h1>
       <p style={{ fontSize: 13, color: "#999", marginBottom: 16 }}>
-        {estAdminPrincipal ? "Accès complet (informations personnelles visibles)." : "Accès limité — informations personnelles masquées."}
+        {estAdminPrincipal ? "Accès complet." : "Accès limité."}
       </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {liste.map((e) => (
@@ -245,7 +390,7 @@ function Electriciens({ role }) {
             {estAdminPrincipal && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #f0f0f0", display: "flex", flexDirection: "column", gap: 6, fontSize: 13, color: "#444" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}><Phone size={13} /> {e.telephone}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}><GraduationCap size={13} /> {e.niveau_etudes} — {e.experience} ans d'expérience</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}><GraduationCap size={13} /> {e.niveau_etudes} {e.experience} ans d'expérience</div>
                 <div style={{ fontSize: 12, color: "#999" }}>Secteur : {e.secteur}</div>
               </div>
             )}
@@ -256,9 +401,6 @@ function Electriciens({ role }) {
   );
 }
 
-// ============================================================
-// EMPLOYÉS — visible et gérable uniquement par admin_principal
-// ============================================================
 function Employes({ role }) {
   const [liste, setListe] = useState([]);
 
@@ -305,9 +447,6 @@ function Employes({ role }) {
   );
 }
 
-// ============================================================
-// PLAINTES — liées au numero_suivi_lie
-// ============================================================
 function Plaintes() {
   const [liste, setListe] = useState([]);
   const [selection, setSelection] = useState(null);
@@ -353,36 +492,4 @@ function Plaintes() {
                 <span style={{ fontSize: 12, color: "#999" }}>{p.numero_suivi_lie}</span>
                 <span style={{ fontSize: 11, fontWeight: 600, color: p.statut === "traite" ? COULEURS.vert : "#D97757" }}>
                   {p.statut === "traite" ? "Traité" : p.statut === "lu" ? "Lu" : "Nouveau"}
-                </span>
-              </div>
-              <div style={{ fontSize: 13, color: "#333", marginTop: 6 }}>{p.contenu}</div>
-              <div style={{ fontSize: 11, color: "#999", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
-                <Phone size={11} /> {p.telephone_client}
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {selection && (
-        <div style={{ flex: 1, background: "white", borderRadius: 14, border: "1px solid #eee", padding: 20 }}>
-          <div style={{ fontSize: 13, color: "#999", marginBottom: 4 }}>{selection.numero_suivi_lie} · {selection.telephone_client}</div>
-          <p style={{ fontSize: 14, color: "#333", marginBottom: 16 }}>{selection.contenu}</p>
-          <textarea
-            value={reponse}
-            onChange={(e) => setReponse(e.target.value)}
-            placeholder="Votre réponse..."
-            rows={4}
-            style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #ddd", fontSize: 14, boxSizing: "border-box", resize: "vertical" }}
-          />
-          <button
-            onClick={envoyerReponse}
-            style={{ marginTop: 10, background: COULEURS.vert, color: "white", border: "none", borderRadius: 10, padding: "9px 16px", cursor: "pointer", fontWeight: 600 }}
-          >
-            Envoyer la réponse
-          </button>
-        </div>
-      )}
-    </div>
-  );
-                }
+        
