@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { Send, Star, CheckCircle2, AlertCircle } from "lucide-react";
-
-// import { supabase } from "./supabaseClient";
+import { supabase } from "../lib/supabase";
 
 const COULEURS = { vert: "#009E49", jaune: "#FFCE00", rouge: "#EF3340" };
 
 // ============================================================
 // FORMULAIRE DE PLAINTE — lié obligatoirement au numéro de suivi
+// La base rejette elle-même toute plainte dont le numéro n'existe
+// pas (trigger trg_verifier_numero_suivi), donc on relaie ce
+// message d'erreur tel quel au client.
 // ============================================================
 export function FormulairePlainte() {
   const [numeroSuivi, setNumeroSuivi] = useState("");
@@ -31,29 +33,25 @@ export function FormulairePlainte() {
 
     setEnvoiEnCours(true);
     try {
-      // La base vérifie elle-même que numero_suivi existe (trigger),
-      // donc on gère aussi l'erreur renvoyée par Supabase si le numéro est invalide.
-      // const { error } = await supabase.from("plaintes").insert({
-      //   numero_suivi_lie: numeroPropre,
-      //   contenu: contenu.trim(),
-      //   auteur: "client",
-      // });
-      // if (error) throw error;
+      const { error } = await supabase.from("plaintes").insert({
+        numero_suivi_lie: numeroPropre,
+        contenu: contenu.trim(),
+        auteur: "client",
+      });
 
-      await new Promise((r) => setTimeout(r, 500));
-      if (!numeroPropre.startsWith("PANNE-") && !numeroPropre.startsWith("INSTAL-")) {
-        throw new Error("Numéro de suivi introuvable.");
+      if (error) {
+        // Le trigger renvoie "Numéro de suivi introuvable : XXX" si le numéro n'existe pas.
+        if (error.message?.includes("introuvable")) {
+          throw new Error("Ce numéro de suivi est introuvable. Vérifiez qu'il correspond bien à votre demande.");
+        }
+        throw new Error("Erreur lors de l'envoi. Réessayez.");
       }
 
       setStatut("succes");
       setContenu("");
     } catch (e) {
       setStatut("erreur");
-      setMessageErreur(
-        e.message?.includes("introuvable") || e.message?.includes("Numéro")
-          ? "Ce numéro de suivi est introuvable. Vérifiez qu'il correspond bien à votre demande."
-          : "Erreur lors de l'envoi. Réessayez."
-      );
+      setMessageErreur(e.message);
     } finally {
       setEnvoiEnCours(false);
     }
@@ -119,13 +117,16 @@ export function FormulairePlainte() {
 
 // ============================================================
 // NOTATION ÉLECTRICIEN — après intervention (esprit Yango)
+// numeroSuivi et electricienId doivent être passés en props
+// depuis l'écran de suivi une fois le statut "resolu" atteint.
 // ============================================================
-export function NotationElectricien({ numeroSuivi = "PANNE-2026-000123", electricienId = "1" }) {
+export function NotationElectricien({ numeroSuivi, electricienId }) {
   const [note, setNote] = useState(0);
   const [survol, setSurvol] = useState(0);
   const [commentaire, setCommentaire] = useState("");
   const [envoye, setEnvoye] = useState(false);
   const [erreur, setErreur] = useState("");
+  const [envoiEnCours, setEnvoiEnCours] = useState(false);
 
   const envoyer = async () => {
     if (note === 0) {
@@ -133,16 +134,28 @@ export function NotationElectricien({ numeroSuivi = "PANNE-2026-000123", electri
       return;
     }
     setErreur("");
+    setEnvoiEnCours(true);
     try {
-      // await supabase.from("notations").insert({
-      //   numero_suivi: numeroSuivi,
-      //   electricien_id: electricienId,
-      //   note,
-      //   commentaire: commentaire.trim() || null,
-      // });
+      const { error } = await supabase.from("notations").insert({
+        numero_suivi: numeroSuivi,
+        electricien_id: electricienId,
+        note,
+        commentaire: commentaire.trim() || null,
+      });
+
+      if (error) {
+        // La contrainte notation_unique_par_suivi bloque une deuxième note sur la même commande.
+        if (error.code === "23505") {
+          throw new Error("Cette intervention a déjà été notée. Merci !");
+        }
+        throw new Error("Erreur lors de l'envoi de votre note. Réessayez.");
+      }
+
       setEnvoye(true);
     } catch (e) {
-      setErreur("Cette intervention a peut-être déjà été notée.");
+      setErreur(e.message);
+    } finally {
+      setEnvoiEnCours(false);
     }
   };
 
@@ -192,12 +205,14 @@ export function NotationElectricien({ numeroSuivi = "PANNE-2026-000123", electri
 
       <button
         onClick={envoyer}
+        disabled={envoiEnCours}
         style={{
           marginTop: 14, width: "100%", background: COULEURS.vert, color: "white",
           border: "none", borderRadius: 10, padding: 12, fontWeight: 600, fontSize: 15, cursor: "pointer",
+          opacity: envoiEnCours ? 0.7 : 1,
         }}
       >
-        Envoyer mon évaluation
+        {envoiEnCours ? "Envoi..." : "Envoyer mon évaluation"}
       </button>
     </div>
   );
