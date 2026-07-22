@@ -51,8 +51,7 @@ export function FormulairePlainte() {
       setEnvoiEnCours(false);
     }
   };
-
-  return (
+ return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Déposer une plainte</h1>
       <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
@@ -70,7 +69,6 @@ export function FormulairePlainte() {
           fontSize: 15, marginTop: 6, marginBottom: 14, boxSizing: "border-box",
         }}
       />
-
       <label style={{ fontSize: 13, fontWeight: 600, color: "#333" }}>Votre message</label>
       <textarea
         value={contenu}
