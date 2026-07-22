@@ -6,7 +6,9 @@ import {
   AlertTriangle, Phone, GraduationCap, Search, Send,
   CheckCircle2, Clock, XCircle, AlertCircle, Shield, Star
 } from "lucide-react";
-import { Electriciens, Employes, Plaintes } from './DashboardAdminOnglets';
+import { Electriciens } from './Electriciens';
+import { Employes } from './Employes';
+import { Plaintes } from './Plaintes';
 import { supabase } from "../lib/supabase";
 
 const COULEURS = { vert: "#009E49", jaune: "#FFCE00", rouge: "#EF3340", encre: "#161616" };
@@ -345,4 +347,4 @@ function ChatPrix({ demande, onFermer }) {
   );
 }
 
-    
+                  
