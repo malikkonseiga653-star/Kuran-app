@@ -9,6 +9,7 @@ import { Electriciens } from "./Electriciens";
 import { Employes } from "./Employes";
 import { Plaintes } from "./Plaintes";
 import { Demandes } from "./Demandes";
+import { Clients } from "./Clients";
 import { supabase } from "../lib/supabase";
 
 const COULEURS = { vert: "#009E49", jaune: "#FFCE00", rouge: "#EF3340", encre: "#161616" };
@@ -23,6 +24,7 @@ const ONGLETS = [
   { id: "electriciens", label: "Électriciens", icon: HardHat },
   { id: "employes", label: "Employés", icon: Users },
   { id: "plaintes", label: "Plaintes", icon: AlertTriangle },
+  { id: "clients", label: "Clients", icon: Users },
 ];
 
 function useRoleCourant() {
@@ -83,6 +85,7 @@ export default function DashboardAdmin() {
           {ongletActif === "electriciens" && <Electriciens role={role} />}
           {ongletActif === "employes" && <Employes role={role} />}
           {ongletActif === "plaintes" && <Plaintes />}
+          {ongletActif === "clients" && <Clients role={role} />}
         </main>
       </div>
     </div>
@@ -183,4 +186,3 @@ function Apercu() {
   );
 }
 
-          
